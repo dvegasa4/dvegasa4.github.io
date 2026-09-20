@@ -46,7 +46,6 @@ function appendEdge(path, x1, y1, x2, y2, tab, tabSize, shape) {
   const ty = dy / len;
   const nx = ty * tab;
   const ny = -tx * tab;
-  const size = tabSize * (0.92 + shape * 0.16);
   // Всегда ровно посередине ребра: два соседних кусочка меряют "along" от
   // разных концов одного и того же отрезка, поэтому любое смещение середины
   // (jitter) физически расходится между выступом и выемкой. Раньше это
@@ -58,20 +57,41 @@ function appendEdge(path, x1, y1, x2, y2, tab, tabSize, shape) {
     y1 + ty * along + ny * bulge,
   ];
 
+  // Один и тот же shape даёт один и тот же вид выступа у обоих соседних
+  // кусочков (они читают одно и то же значение ребра), поэтому форма
+  // выступа и выемки на стыке совпадают. Три явно разных силуэта — острый
+  // треугольник, гранёный "квадрат" и текущий скруглённый — читаются легко
+  // и не спорят с минимализмом стиля.
+  const bucket = shape * 3;
+  const kind = Math.min(2, Math.floor(bucket));
+  const frac = bucket - kind;
+  const size = tabSize * (0.92 + frac * 0.16);
   const neck = size * 0.95;
+
   path.lineTo(...p(mid - neck, 0));
-  // Простой симметричный округлый выступ из двух кривых — форма читается
-  // яснее, чем прежний вытянутый "блоб" из трёх кривых.
-  path.bezierCurveTo(
-    ...p(mid - neck * 0.32, 0),
-    ...p(mid - size * 0.62, size * 1.02),
-    ...p(mid, size * 1.05)
-  );
-  path.bezierCurveTo(
-    ...p(mid + size * 0.62, size * 1.02),
-    ...p(mid + neck * 0.32, 0),
-    ...p(mid + neck, 0)
-  );
+  if (kind === 0) {
+    // Треугольник — острый пик, без единой кривой.
+    path.lineTo(...p(mid, size * 1.2));
+    path.lineTo(...p(mid + neck, 0));
+  } else if (kind === 1) {
+    // Квадрат — плоская "площадка" с прямыми углами.
+    const shoulder = neck * 0.6;
+    path.lineTo(...p(mid - shoulder, size * 1.02));
+    path.lineTo(...p(mid + shoulder, size * 1.02));
+    path.lineTo(...p(mid + neck, 0));
+  } else {
+    // Скруглённый выступ из двух симметричных кривых (как раньше).
+    path.bezierCurveTo(
+      ...p(mid - neck * 0.32, 0),
+      ...p(mid - size * 0.62, size * 1.02),
+      ...p(mid, size * 1.05)
+    );
+    path.bezierCurveTo(
+      ...p(mid + size * 0.62, size * 1.02),
+      ...p(mid + neck * 0.32, 0),
+      ...p(mid + neck, 0)
+    );
+  }
   path.lineTo(x2, y2);
 }
 

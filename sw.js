@@ -1,4 +1,4 @@
-const CACHE = "puzzles-shell-v10";
+const CACHE = "puzzles-shell-v11";
 const ASSETS = [
   "./",
   "./index.html",
