@@ -1,6 +1,7 @@
-import { getPuzzle, updateProgress, isQuotaError } from "../storage/db.js";
+import { getPuzzle, updateProgress, isQuotaError, getProfile, awardCompletion } from "../storage/db.js";
 import { PuzzleEngine } from "../puzzle/engine.js";
-import { showToast, progressOf } from "../ui.js";
+import { showToast, progressOf, starsForPieces } from "../ui.js";
+import { playWin } from "../audio.js";
 
 export function renderPlay(root, id) {
   const screen = document.createElement("div");
@@ -14,6 +15,7 @@ export function renderPlay(root, id) {
           <path d="M12 8v.01M11 12h1v4h1"/>
         </svg>
       </button>
+      <div class="pill pill-stars" data-stars>★ 0</div>
       <div class="pill" data-pct>0%</div>
     </div>
     <div class="play-stage">
@@ -38,6 +40,7 @@ export function renderPlay(root, id) {
         <div class="win-card">
           <h2>Готово!</h2>
           <p>Картинка собралась. Можно начать другой пазл или пересмотреть этот.</p>
+          <p class="earned-stars" data-earned hidden>+<span data-earned-amount>0</span> ★</p>
           <a class="btn btn-block" href="#/">К списку</a>
         </div>
       </div>
@@ -47,15 +50,38 @@ export function renderPlay(root, id) {
 
   const canvas = screen.querySelector("canvas");
   const pctEl = screen.querySelector("[data-pct]");
+  const starsEl = screen.querySelector("[data-stars]");
   const hintBtn = screen.querySelector("[data-hint]");
   const loadingEl = screen.querySelector("[data-loading]");
   const errorEl = screen.querySelector("[data-error]");
   const errorTextEl = screen.querySelector("[data-error-text]");
   const winEl = screen.querySelector("[data-win]");
+  const earnedEl = screen.querySelector("[data-earned]");
+  const earnedAmountEl = screen.querySelector("[data-earned-amount]");
 
   let engine = null;
   let gone = false;
   let winTimer = 0;
+  let wakeLock = null;
+
+  const releaseWakeLock = () => {
+    if (wakeLock) {
+      wakeLock.release().catch(() => {});
+      wakeLock = null;
+    }
+  };
+
+  const requestWakeLock = async () => {
+    if (gone || !("wakeLock" in navigator)) return;
+    try {
+      wakeLock = await navigator.wakeLock.request("screen");
+      wakeLock.addEventListener("release", () => {
+        wakeLock = null;
+      });
+    } catch {
+      // недоступно (например, режим экономии батареи) — не критично
+    }
+  };
 
   const persist = async (state, extra = {}) => {
     try {
@@ -66,7 +92,11 @@ export function renderPlay(root, id) {
   };
 
   const onVis = () => {
-    if (document.visibilityState === "hidden") engine?.emit(true);
+    if (document.visibilityState === "hidden") {
+      engine?.emit(true);
+    } else if (document.visibilityState === "visible" && engine && !wakeLock) {
+      requestWakeLock();
+    }
   };
   document.addEventListener("visibilitychange", onVis);
   window.addEventListener("pagehide", onVis);
@@ -87,9 +117,17 @@ export function renderPlay(root, id) {
     engine?.destroy();
     engine = null;
     clearTimeout(winTimer);
+    releaseWakeLock();
     errorEl.hidden = true;
     winEl.hidden = true;
+    earnedEl.hidden = true;
     loadingEl.hidden = false;
+
+    getProfile()
+      .then((profile) => {
+        if (!gone) starsEl.textContent = `★ ${profile.stars}`;
+      })
+      .catch((err) => console.error("Не удалось прочитать звёзды", err));
 
     let puzzle;
     try {
@@ -140,9 +178,28 @@ export function renderPlay(root, id) {
         onComplete() {
           pctEl.textContent = "100%";
           clearTimeout(winTimer);
-          winTimer = setTimeout(() => {
-            if (!gone) winEl.hidden = false;
-          }, 5000);
+          // Звёзды начисляем сразу и надёжно (не зависит от того, останется
+          // ли пользователь на экране все 5 секунд до появления "Готово!").
+          const amount = starsForPieces(puzzle.cols * puzzle.rows);
+          const awardPromise = awardCompletion(puzzle.id, amount).catch((err) => {
+            console.error("Не удалось начислить звёзды", err);
+            return null;
+          });
+          winTimer = setTimeout(async () => {
+            const result = await awardPromise;
+            if (gone) return;
+            if (result?.awarded) {
+              starsEl.textContent = `★ ${result.profile.stars}`;
+              starsEl.classList.remove("bump");
+              void starsEl.offsetWidth;
+              starsEl.classList.add("bump");
+              earnedAmountEl.textContent = String(amount);
+              earnedEl.hidden = false;
+            }
+            engine?.celebrate();
+            playWin();
+            winEl.hidden = false;
+          }, 1000);
         },
       });
     } catch (err) {
@@ -155,6 +212,7 @@ export function renderPlay(root, id) {
     loadingEl.hidden = true;
     updatePct(engine.snapshot());
     if (puzzle.completed) winEl.hidden = false;
+    requestWakeLock();
   };
 
   screen.querySelector("[data-retry]").addEventListener("click", load);
@@ -167,6 +225,7 @@ export function renderPlay(root, id) {
     document.removeEventListener("visibilitychange", onVis);
     window.removeEventListener("pagehide", onVis);
     engine?.destroy();
+    releaseWakeLock();
   };
 }
 

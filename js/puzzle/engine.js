@@ -1,4 +1,5 @@
 import { buildPieces } from "./jigsaw.js";
+import { playSnap } from "../audio.js";
 
 const MIN_SCALE = 0.18;
 const MAX_SCALE = 5.5;
@@ -44,6 +45,7 @@ export class PuzzleEngine {
     this.raf = 0;
     this.sparks = [];
     this.rings = [];
+    this.confetti = [];
     this.pointers = new Map();
     this.drag = null;
     this.panning = false;
@@ -75,7 +77,7 @@ export class PuzzleEngine {
 
     const loop = (now) => {
       this.raf = requestAnimationFrame(loop);
-      const animating = this.sparks.length > 0 || this.rings.length > 0;
+      const animating = this.sparks.length > 0 || this.rings.length > 0 || this.confetti.length > 0;
       if (this.dirty || animating) {
         this.draw(now);
         this.dirty = animating;
@@ -259,6 +261,7 @@ export class PuzzleEngine {
         merged = true;
         changed = true;
         this.spawnBurst(contactX, contactY);
+        playSnap();
         break;
       }
       if (this.isLoneCorner(group)) {
@@ -361,6 +364,35 @@ export class PuzzleEngine {
     this.dirty = true;
   }
 
+  // Полноэкранный залп конфетти в экранных координатах (не зависит от
+  // текущего zoom/pan сцены). Вызывается снаружи (play.js) в момент, когда
+  // нужно показать финальное празднование.
+  celebrate() {
+    const w = this.canvas.clientWidth || 1;
+    const h = this.canvas.clientHeight || 1;
+    const colors = ["#ff7a59", "#ffd56b", "#7ee0c6", "#ff5fa2", "#7aa7ff", "#ffffff"];
+    const now = performance.now();
+    const count = 90;
+    for (let i = 0; i < count; i++) {
+      const size = 5 + Math.random() * 5;
+      this.confetti.push({
+        x: Math.random() * w,
+        y: -20 - Math.random() * h * 0.4,
+        vx: (Math.random() - 0.5) * 0.09,
+        vy: 0.15 + Math.random() * 0.14,
+        rot: Math.random() * Math.PI * 2,
+        vr: (Math.random() - 0.5) * 0.01,
+        sway: Math.random() * Math.PI * 2,
+        size,
+        color: colors[i % colors.length],
+        shape: Math.random() < 0.5 ? "rect" : "circle",
+        start: now,
+        life: 2400 + Math.random() * 1400,
+      });
+    }
+    this.dirty = true;
+  }
+
   drawFx(ctx, now) {
     if (this.rings.length) {
       this.rings = this.rings.filter((r) => now - r.start < r.life);
@@ -393,6 +425,36 @@ export class PuzzleEngine {
         ctx.fill();
         ctx.restore();
       }
+    }
+  }
+
+  // Рисуется в экранных координатах (после ctx.restore() трансформации
+  // сцены), поэтому конфетти всегда покрывает весь видимый экран.
+  drawConfetti(ctx, now) {
+    if (!this.confetti.length) return;
+    const h = this.canvas.clientHeight || 1;
+    this.confetti = this.confetti.filter((c) => now - c.start < c.life && c.y < h + 40);
+    for (const c of this.confetti) {
+      const elapsed = now - c.start;
+      const t = elapsed / 1000;
+      const x = c.x + c.vx * elapsed + Math.sin(c.sway + t * 3) * 10;
+      const y = c.y + c.vy * elapsed;
+      const rot = c.rot + c.vr * elapsed;
+      const fadeStart = c.life - 400;
+      const alpha = elapsed > fadeStart ? Math.max(0, (c.life - elapsed) / 400) : 1;
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.translate(x, y);
+      ctx.rotate(rot);
+      ctx.fillStyle = c.color;
+      if (c.shape === "rect") {
+        ctx.fillRect(-c.size / 2, -c.size * 0.35, c.size, c.size * 0.7);
+      } else {
+        ctx.beginPath();
+        ctx.arc(0, 0, c.size / 2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
     }
   }
 
@@ -562,6 +624,8 @@ export class PuzzleEngine {
 
     this.drawFx(ctx, now);
     ctx.restore();
+
+    this.drawConfetti(ctx, now);
   }
 
   drawBoard(ctx) {

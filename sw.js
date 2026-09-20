@@ -1,4 +1,4 @@
-const CACHE = "puzzles-shell-v8";
+const CACHE = "puzzles-shell-v9";
 const ASSETS = [
   "./",
   "./index.html",
@@ -6,6 +6,7 @@ const ASSETS = [
   "./css/styles.css",
   "./js/main.js",
   "./js/ui.js",
+  "./js/audio.js",
   "./js/storage/db.js",
   "./js/puzzle/jigsaw.js",
   "./js/puzzle/engine.js",

@@ -1,5 +1,5 @@
 import { savePuzzle, isQuotaError } from "../storage/db.js";
-import { DIFFICULTIES, gridFor, newId, showToast } from "../ui.js";
+import { DIFFICULTIES, gridFor, newId, showToast, starsForPieces } from "../ui.js";
 
 export function renderCreate(root) {
   const screen = document.createElement("div");
@@ -37,7 +37,7 @@ export function renderCreate(root) {
     b.className = "diff";
     b.dataset.id = d.id;
     b.setAttribute("aria-pressed", d === selected ? "true" : "false");
-    b.innerHTML = `<b>${d.label}</b><span>${d.pieces} кусочков</span>`;
+    b.innerHTML = `<b>${d.label}</b><span>${d.pieces} кусочков · +${starsForPieces(d.pieces)} ★</span>`;
     diffsEl.append(b);
   }
 

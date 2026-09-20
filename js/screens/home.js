@@ -1,4 +1,4 @@
-import { listPuzzles, deletePuzzle } from "../storage/db.js";
+import { listPuzzles, deletePuzzle, getProfile } from "../storage/db.js";
 import { confirmModal, progressOf, formatDate, showToast } from "../ui.js";
 
 const logoSvg = `
@@ -17,8 +17,9 @@ export function renderHome(root) {
 
   const paint = async () => {
     let puzzles;
+    let profile;
     try {
-      puzzles = await listPuzzles();
+      [puzzles, profile] = await Promise.all([listPuzzles(), getProfile()]);
     } catch (err) {
       console.error("Не удалось прочитать список пазлов", err);
       if (gone) return;
@@ -41,6 +42,7 @@ export function renderHome(root) {
       <div class="topbar">
         <div class="logo">${logoSvg}</div>
         <h1>Пазлы</h1>
+        <div class="pill pill-stars">★ ${profile.stars}</div>
       </div>
       <p class="sub">Загрузите фото и соберите его кусочками. Прогресс остаётся на этом телефоне.</p>
       <a class="btn btn-block" href="#/new">Новый пазл</a>

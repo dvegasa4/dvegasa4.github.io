@@ -105,6 +105,40 @@ a {
   height: 26px;
 }
 
+.pill {
+  min-height: 36px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: #fff;
+  font-weight: 700;
+  display: grid;
+  place-items: center;
+  box-shadow: 0 4px 12px rgba(58, 42, 36, 0.08);
+  flex: none;
+  transition: transform 0.25s ease;
+}
+
+.pill-stars {
+  background: linear-gradient(180deg, #ffe38f, var(--sun));
+  color: #6b4a12;
+}
+
+.pill-stars.bump {
+  animation: pillBump 0.4s ease;
+}
+
+@keyframes pillBump {
+  0% {
+    transform: scale(1);
+  }
+  40% {
+    transform: scale(1.18);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
 .sub {
   margin: 0 0 18px;
   color: var(--ink-soft);
@@ -348,16 +382,8 @@ a {
   z-index: 2;
 }
 
-.play-bar .pill {
+.play-bar .pill:first-of-type {
   margin-left: auto;
-  min-height: 36px;
-  padding: 0 12px;
-  border-radius: 999px;
-  background: #fff;
-  font-weight: 700;
-  display: grid;
-  place-items: center;
-  box-shadow: 0 4px 12px rgba(58, 42, 36, 0.08);
 }
 
 .play-stage {
@@ -406,6 +432,32 @@ a {
 .win-card h2 {
   margin: 0 0 8px;
   font-size: 1.8rem;
+}
+
+.earned-stars {
+  margin: -6px 0 16px !important;
+  font-size: 1.5rem;
+  font-weight: 800;
+  color: #b9760a !important;
+  animation: earnedPop 0.5s ease;
+}
+
+.earned-stars[hidden] {
+  display: none !important;
+}
+
+@keyframes earnedPop {
+  0% {
+    transform: scale(0.4);
+    opacity: 0;
+  }
+  60% {
+    transform: scale(1.15);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+  }
 }
 
 .win-card p {

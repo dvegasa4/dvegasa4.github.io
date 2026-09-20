@@ -64,6 +64,13 @@ export function formatDate(ts) {
   });
 }
 
+const STAR_REWARDS = { 12: 1, 24: 2, 48: 4, 80: 7 };
+
+export function starsForPieces(n) {
+  if (STAR_REWARDS[n] != null) return STAR_REWARDS[n];
+  return Math.max(1, Math.round((n / 80) * 7));
+}
+
 export function newId() {
   if (crypto.randomUUID) return crypto.randomUUID();
   return `p-${Date.now()}-${Math.random().toString(16).slice(2)}`;

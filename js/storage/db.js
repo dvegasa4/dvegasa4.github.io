@@ -1,7 +1,9 @@
 const DB_NAME = "puzzles-db";
-const DB_VER = 1;
+const DB_VER = 2;
 const META = "puzzles";
 const IMAGES = "images";
+const PROFILE = "profile";
+const PROFILE_ID = "me";
 
 let dbPromise;
 
@@ -16,6 +18,9 @@ function openDb() {
         }
         if (!db.objectStoreNames.contains(IMAGES)) {
           db.createObjectStore(IMAGES, { keyPath: "id" });
+        }
+        if (!db.objectStoreNames.contains(PROFILE)) {
+          db.createObjectStore(PROFILE, { keyPath: "id" });
         }
       };
       req.onsuccess = () => resolve(req.result);
@@ -88,4 +93,45 @@ export async function deletePuzzle(id) {
 export function isQuotaError(err) {
   if (!err) return false;
   return err.name === "QuotaExceededError" || err.code === 22;
+}
+
+const emptyProfile = () => ({ id: PROFILE_ID, stars: 0, completedCount: 0 });
+
+export async function getProfile() {
+  const db = await openDb();
+  const tx = db.transaction(PROFILE, "readonly");
+  const rec = await reqToPromise(tx.objectStore(PROFILE).get(PROFILE_ID));
+  return rec || emptyProfile();
+}
+
+// Начисляет звёзды за пазл ровно один раз (флаг starsAwarded в записи пазла
+// защищает от повторного начисления, если пользователь просто открыл уже
+// собранный пазл снова).
+export async function awardCompletion(puzzleId, amount) {
+  const db = await openDb();
+  const tx = db.transaction([META, PROFILE], "readwrite");
+  const metaStore = tx.objectStore(META);
+  const profileStore = tx.objectStore(PROFILE);
+
+  const meta = await reqToPromise(metaStore.get(puzzleId));
+  if (!meta || meta.starsAwarded) {
+    const existing = (await reqToPromise(profileStore.get(PROFILE_ID))) || emptyProfile();
+    await txDone(tx);
+    return { awarded: false, profile: existing };
+  }
+
+  meta.starsAwarded = true;
+  meta.updatedAt = Date.now();
+  metaStore.put(meta);
+
+  const current = (await reqToPromise(profileStore.get(PROFILE_ID))) || emptyProfile();
+  const updated = {
+    id: PROFILE_ID,
+    stars: current.stars + amount,
+    completedCount: current.completedCount + 1,
+  };
+  profileStore.put(updated);
+
+  await txDone(tx);
+  return { awarded: true, profile: updated };
 }
