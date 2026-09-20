@@ -34,7 +34,12 @@ export function generateEdges(rows, cols, seed) {
   return { vTab, vShape, hTab, hShape };
 }
 
-function appendEdge(path, x1, y1, x2, y2, tab, tabSize, shape) {
+// Стили из магазина принудительно задают форму выступа на всех рёбрах
+// пазла (см. PIECE_STYLE_KIND). Без стиля ("mix", бесплатный дефолт) форма
+// каждого ребра выбирается случайно из bucket ниже.
+const PIECE_STYLE_KIND = { triangle: 0, hexagon: 3 };
+
+function appendEdge(path, x1, y1, x2, y2, tab, tabSize, shape, forcedKind) {
   if (tab === 0) {
     path.lineTo(x2, y2);
     return;
@@ -59,12 +64,21 @@ function appendEdge(path, x1, y1, x2, y2, tab, tabSize, shape) {
 
   // Один и тот же shape даёт один и тот же вид выступа у обоих соседних
   // кусочков (они читают одно и то же значение ребра), поэтому форма
-  // выступа и выемки на стыке совпадают. Три явно разных силуэта — острый
-  // треугольник, гранёный "квадрат" и текущий скруглённый — читаются легко
-  // и не спорят с минимализмом стиля.
-  const bucket = shape * 3;
-  const kind = Math.min(2, Math.floor(bucket));
-  const frac = bucket - kind;
+  // выступа и выемки на стыке совпадают. Явно разных силуэта — острый
+  // треугольник, гранёный "квадрат", скруглённый и шестиугольный — читаются
+  // легко и не спорят с минимализмом стиля.
+  let kind;
+  let frac;
+  if (forcedKind != null) {
+    // Купленный в магазине стиль — один вид на все рёбра пазла, размер
+    // всё равно чуть гуляет от shape, чтобы кусочки не были клонами.
+    kind = forcedKind;
+    frac = shape;
+  } else {
+    const bucket = shape * 3;
+    kind = Math.min(2, Math.floor(bucket));
+    frac = bucket - kind;
+  }
   const size = tabSize * (0.92 + frac * 0.16);
   const neck = size * 0.95;
 
@@ -78,6 +92,15 @@ function appendEdge(path, x1, y1, x2, y2, tab, tabSize, shape) {
     const shoulder = neck * 0.6;
     path.lineTo(...p(mid - shoulder, size * 1.02));
     path.lineTo(...p(mid + shoulder, size * 1.02));
+    path.lineTo(...p(mid + neck, 0));
+  } else if (kind === 3) {
+    // Шестиугольник — гранёная "бочка" из 4 доп. точек прямыми линиями.
+    const bevel = neck * 0.45;
+    const topHalf = neck * 0.4;
+    path.lineTo(...p(mid - neck + bevel, size * 0.58));
+    path.lineTo(...p(mid - topHalf, size * 1.05));
+    path.lineTo(...p(mid + topHalf, size * 1.05));
+    path.lineTo(...p(mid + neck - bevel, size * 0.58));
     path.lineTo(...p(mid + neck, 0));
   } else {
     // Скруглённый выступ из двух симметричных кривых (как раньше).
@@ -95,8 +118,9 @@ function appendEdge(path, x1, y1, x2, y2, tab, tabSize, shape) {
   path.lineTo(x2, y2);
 }
 
-export function createPiecePath(row, col, rows, cols, cellW, cellH, edges, tabSize) {
+export function createPiecePath(row, col, rows, cols, cellW, cellH, edges, tabSize, pieceStyle) {
   const { vTab, vShape, hTab, hShape } = edges;
+  const forcedKind = pieceStyle ? PIECE_STYLE_KIND[pieceStyle] : undefined;
   const northTab = row === 0 ? 0 : -hTab[row - 1][col];
   const northShape = row === 0 ? 0.5 : hShape[row - 1][col];
   const eastTab = col === cols - 1 ? 0 : vTab[row][col];
@@ -108,10 +132,10 @@ export function createPiecePath(row, col, rows, cols, cellW, cellH, edges, tabSi
 
   const path = new Path2D();
   path.moveTo(0, 0);
-  appendEdge(path, 0, 0, cellW, 0, northTab, tabSize, northShape);
-  appendEdge(path, cellW, 0, cellW, cellH, eastTab, tabSize, eastShape);
-  appendEdge(path, cellW, cellH, 0, cellH, southTab, tabSize, southShape);
-  appendEdge(path, 0, cellH, 0, 0, westTab, tabSize, westShape);
+  appendEdge(path, 0, 0, cellW, 0, northTab, tabSize, northShape, forcedKind);
+  appendEdge(path, cellW, 0, cellW, cellH, eastTab, tabSize, eastShape, forcedKind);
+  appendEdge(path, cellW, cellH, 0, cellH, southTab, tabSize, southShape, forcedKind);
+  appendEdge(path, 0, cellH, 0, 0, westTab, tabSize, westShape, forcedKind);
   path.closePath();
   return path;
 }
@@ -144,7 +168,7 @@ export function createPieceBitmap(image, row, col, cellW, cellH, path, pad) {
   return canvas;
 }
 
-export function buildPieces(image, rows, cols, seed) {
+export function buildPieces(image, rows, cols, seed, pieceStyle) {
   const boardW = image.width;
   const boardH = image.height;
   const cellW = boardW / cols;
@@ -155,7 +179,7 @@ export function buildPieces(image, rows, cols, seed) {
   const pieces = [];
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
-      const path = createPiecePath(r, c, rows, cols, cellW, cellH, edges, tabSize);
+      const path = createPiecePath(r, c, rows, cols, cellW, cellH, edges, tabSize, pieceStyle);
       const bitmap = createPieceBitmap(image, r, c, cellW, cellH, path, pad);
       pieces.push({
         id: r * cols + c,

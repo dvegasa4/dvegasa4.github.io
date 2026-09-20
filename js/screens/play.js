@@ -16,7 +16,8 @@ export function renderPlay(root, id) {
         </svg>
       </button>
       <div class="pill pill-stars" data-stars>★ 0</div>
-      <div class="pill pill-dollars" data-dollars>$ 0</div>
+      <div class="pill pill-dollars" data-bank-dollars title="Общий банк">Банк $0</div>
+      <div class="pill pill-dollars" data-dollars title="Счётчик этого пазла">Пазл $0</div>
       <div class="pill" data-pct>0%</div>
     </div>
     <div class="play-stage">
@@ -52,6 +53,7 @@ export function renderPlay(root, id) {
   const canvas = screen.querySelector("canvas");
   const pctEl = screen.querySelector("[data-pct]");
   const starsEl = screen.querySelector("[data-stars]");
+  const bankDollarsEl = screen.querySelector("[data-bank-dollars]");
   const dollarsEl = screen.querySelector("[data-dollars]");
   const hintBtn = screen.querySelector("[data-hint]");
   const loadingEl = screen.querySelector("[data-loading]");
@@ -105,9 +107,11 @@ export function renderPlay(root, id) {
   window.addEventListener("pagehide", onVis);
 
   hintBtn.addEventListener("click", () => {
-    const on = hintBtn.getAttribute("aria-pressed") !== "true";
-    hintBtn.setAttribute("aria-pressed", on ? "true" : "false");
-    engine?.setHint(on);
+    // Пока подсказка уже активна — повторный клик молчит (она сама
+    // погаснет и снимет aria-pressed через onHintChange).
+    if (!engine || engine.hint) return;
+    const ok = engine.activateHint();
+    if (!ok) showToast("Не хватает $ на этом пазле");
   });
 
   const showError = (message) => {
@@ -125,10 +129,13 @@ export function renderPlay(root, id) {
     winEl.hidden = true;
     earnedEl.hidden = true;
     loadingEl.hidden = false;
+    hintBtn.setAttribute("aria-pressed", "false");
 
     getProfile()
       .then((profile) => {
-        if (!gone) starsEl.textContent = `★ ${profile.stars}`;
+        if (gone) return;
+        starsEl.textContent = `★ ${profile.stars}`;
+        bankDollarsEl.textContent = `Банк $${profile.dollars}`;
       })
       .catch((err) => console.error("Не удалось прочитать звёзды", err));
 
@@ -170,7 +177,7 @@ export function renderPlay(root, id) {
     const updatePct = (state) => {
       const pct = progressOf({ cols: puzzle.cols, rows: puzzle.rows, groups: state.groups, completed: state.completed });
       pctEl.textContent = `${pct}%`;
-      if (typeof state.dollars === "number") dollarsEl.textContent = `$ ${state.dollars}`;
+      if (typeof state.dollars === "number") dollarsEl.textContent = `Пазл $${state.dollars}`;
     };
 
     try {
@@ -178,6 +185,9 @@ export function renderPlay(root, id) {
         onChange(state) {
           updatePct(state);
           persist(state);
+        },
+        onHintChange(active) {
+          hintBtn.setAttribute("aria-pressed", active ? "true" : "false");
         },
         onComplete() {
           pctEl.textContent = "100%";
@@ -198,10 +208,13 @@ export function renderPlay(root, id) {
             if (gone) return;
             if (result?.awarded) {
               starsEl.textContent = `★ ${result.profile.stars}`;
-              dollarsEl.textContent = `$ ${dollarsAmount}`;
+              bankDollarsEl.textContent = `Банк $${result.profile.dollars}`;
+              dollarsEl.textContent = `Пазл $${dollarsAmount}`;
               starsEl.classList.remove("bump");
+              bankDollarsEl.classList.remove("bump");
               void starsEl.offsetWidth;
               starsEl.classList.add("bump");
+              bankDollarsEl.classList.add("bump");
               earnedAmountEl.textContent = String(starsAmount);
               earnedDollarsEl.textContent = String(dollarsAmount);
               earnedEl.hidden = false;

@@ -39,6 +39,80 @@ export function playSnap() {
   }
 }
 
+// --- Платные эффекты стыковки из магазина ------------------------------
+
+// Пузырьки — короткий восходящий "поп".
+export function playBubble() {
+  try {
+    const ac = getCtx();
+    if (!ac) return;
+    const t = ac.currentTime;
+    const osc = ac.createOscillator();
+    const gain = ac.createGain();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(320, t);
+    osc.frequency.exponentialRampToValueAtTime(900, t + 0.09);
+    gain.gain.setValueAtTime(0, t);
+    gain.gain.linearRampToValueAtTime(0.16, t + 0.015);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.12);
+    osc.connect(gain);
+    gain.connect(ac.destination);
+    osc.start(t);
+    osc.stop(t + 0.14);
+  } catch {
+    /* звук — не критичная часть игры */
+  }
+}
+
+// Колокольчик — высокий тон с долгим затуханием и лёгким обертоном.
+export function playBell() {
+  try {
+    const ac = getCtx();
+    if (!ac) return;
+    const t = ac.currentTime;
+    tone(ac, 1318.5, t, 0.7, "sine", 0.14);
+    tone(ac, 2637, t, 0.5, "sine", 0.05);
+  } catch {
+    /* звук — не критичная часть игры */
+  }
+}
+
+// Пёрдёж/отрыжка — пилообразный осциллятор с падающей частотой и лёгким
+// дрожанием тона (LFO по частоте) для комичного "буээ" без внешних файлов.
+export function playFart() {
+  try {
+    const ac = getCtx();
+    if (!ac) return;
+    const t = ac.currentTime;
+    const osc = ac.createOscillator();
+    const gain = ac.createGain();
+    osc.type = "sawtooth";
+    osc.frequency.setValueAtTime(170, t);
+    osc.frequency.exponentialRampToValueAtTime(55, t + 0.35);
+
+    const lfo = ac.createOscillator();
+    const lfoGain = ac.createGain();
+    lfo.frequency.value = 26;
+    lfoGain.gain.value = 16;
+    lfo.connect(lfoGain);
+    lfoGain.connect(osc.frequency);
+
+    gain.gain.setValueAtTime(0, t);
+    gain.gain.linearRampToValueAtTime(0.16, t + 0.03);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.4);
+
+    osc.connect(gain);
+    gain.connect(ac.destination);
+
+    lfo.start(t);
+    osc.start(t);
+    lfo.stop(t + 0.42);
+    osc.stop(t + 0.42);
+  } catch {
+    /* звук — не критичная часть игры */
+  }
+}
+
 // Короткая победная мелодия при полной сборке пазла.
 export function playWin() {
   try {

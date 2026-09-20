@@ -95,7 +95,7 @@ export function isQuotaError(err) {
   return err.name === "QuotaExceededError" || err.code === 22;
 }
 
-const emptyProfile = () => ({ id: PROFILE_ID, stars: 0, dollars: 0, completedCount: 0 });
+const emptyProfile = () => ({ id: PROFILE_ID, stars: 0, dollars: 0, completedCount: 0, ownedItems: [] });
 
 export async function getProfile() {
   const db = await openDb();
@@ -126,6 +126,7 @@ export async function awardCompletion(puzzleId, { stars, dollars }) {
 
   const current = { ...emptyProfile(), ...((await reqToPromise(profileStore.get(PROFILE_ID))) || {}) };
   const updated = {
+    ...current,
     id: PROFILE_ID,
     stars: current.stars + stars,
     dollars: current.dollars + dollars,
@@ -135,4 +136,32 @@ export async function awardCompletion(puzzleId, { stars, dollars }) {
 
   await txDone(tx);
   return { awarded: true, profile: updated };
+}
+
+// Покупка предмета в магазине: списывает $ из общего банка и добавляет id
+// в ownedItems. Идемпотентно — повторная покупка уже купленного ничего не
+// списывает.
+export async function purchaseItem(itemId, price) {
+  const db = await openDb();
+  const tx = db.transaction(PROFILE, "readwrite");
+  const store = tx.objectStore(PROFILE);
+  const current = { ...emptyProfile(), ...((await reqToPromise(store.get(PROFILE_ID))) || {}) };
+
+  if (current.ownedItems.includes(itemId)) {
+    await txDone(tx);
+    return { ok: false, reason: "owned", profile: current };
+  }
+  if (current.dollars < price) {
+    await txDone(tx);
+    return { ok: false, reason: "insufficient", profile: current };
+  }
+
+  const updated = {
+    ...current,
+    dollars: current.dollars - price,
+    ownedItems: [...current.ownedItems, itemId],
+  };
+  store.put(updated);
+  await txDone(tx);
+  return { ok: true, profile: updated };
 }

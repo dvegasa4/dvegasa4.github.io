@@ -1,5 +1,14 @@
-import { savePuzzle, isQuotaError } from "../storage/db.js";
-import { DIFFICULTIES, gridFor, newId, showToast, starsForPieces } from "../ui.js";
+import { savePuzzle, isQuotaError, getProfile } from "../storage/db.js";
+import { DIFFICULTIES, gridFor, newId, showToast, starsForPieces, SHOP_ITEMS } from "../ui.js";
+
+// Пикеры косметики показываются только для категорий, где куплен хотя бы
+// один платный вариант — иначе просто используется бесплатный дефолт без
+// лишнего UI на экране создания пазла.
+const COSMETIC_GROUPS = [
+  { category: "pieceStyle", title: "Стиль кусочков", defaultValue: "mix", defaultLabel: "Обычный микс" },
+  { category: "colorTheme", title: "Цветовая тема", defaultValue: "classic", defaultLabel: "Классическая" },
+  { category: "mergeEffect", title: "Эффект стыковки", defaultValue: "sparks", defaultLabel: "Искры" },
+];
 
 export function renderCreate(root) {
   const screen = document.createElement("div");
@@ -20,32 +29,107 @@ export function renderCreate(root) {
     <div data-rest hidden>
       <p class="sub" style="margin-bottom:8px">Сложность</p>
       <div class="diffs"></div>
+      <div data-cosmetics hidden></div>
       <button class="btn btn-block" type="button" data-start>Начать сборку</button>
     </div>
   `;
   root.append(screen);
 
   const diffsEl = screen.querySelector(".diffs");
+  const cosmeticsEl = screen.querySelector("[data-cosmetics]");
   let selected = DIFFICULTIES[1];
   let file = null;
   let previewUrl = "";
   let gone = false;
+  // Пока профиль не прочитан — считаем, что ничего не куплено (безопасный
+  // дефолт: «Мастер» заблокирован, пикеров косметики нет).
+  let profile = { stars: 0, dollars: 0, ownedItems: [] };
+  const cosmetics = { pieceStyle: "mix", colorTheme: "classic", mergeEffect: "sparks" };
 
-  for (const d of DIFFICULTIES) {
-    const b = document.createElement("button");
-    b.type = "button";
-    b.className = "diff";
-    b.dataset.id = d.id;
-    b.setAttribute("aria-pressed", d === selected ? "true" : "false");
-    b.innerHTML = `<b>${d.label}</b><span>${d.pieces} кусочков · +${starsForPieces(d.pieces)}★ · $${d.dollars}</span>`;
-    diffsEl.append(b);
+  function buildDiffs() {
+    diffsEl.innerHTML = "";
+    for (const d of DIFFICULTIES) {
+      const locked = !!d.unlockId && !profile.ownedItems.includes(d.unlockId);
+      if (locked && selected === d) selected = DIFFICULTIES[1];
+      const el = document.createElement(locked ? "a" : "button");
+      el.className = locked ? "diff diff-locked" : "diff";
+      el.dataset.id = d.id;
+      if (locked) {
+        el.href = "#/shop";
+        const price = SHOP_ITEMS.find((it) => it.id === d.unlockId)?.price ?? 0;
+        el.innerHTML = `<b>🔒 ${d.label}</b><span>${d.pieces} кусочков · открыть за $${price}</span>`;
+      } else {
+        el.type = "button";
+        el.setAttribute("aria-pressed", d === selected ? "true" : "false");
+        el.innerHTML = `<b>${d.label}</b><span>${d.pieces} кусочков · +${starsForPieces(d.pieces)}★ · $${d.dollars}</span>`;
+      }
+      diffsEl.append(el);
+    }
   }
+
+  function buildCosmetics() {
+    cosmeticsEl.innerHTML = "";
+    for (const group of COSMETIC_GROUPS) {
+      const owned = SHOP_ITEMS.filter(
+        (item) => item.category === group.category && profile.ownedItems.includes(item.id)
+      );
+      if (owned.length === 0) continue;
+      const wrap = document.createElement("div");
+      wrap.className = "cosmetic-group";
+      const title = document.createElement("p");
+      title.className = "sub";
+      title.style.marginBottom = "8px";
+      title.textContent = group.title;
+      const row = document.createElement("div");
+      row.className = "diffs";
+      const options = [{ value: group.defaultValue, label: group.defaultLabel }, ...owned];
+      for (const opt of options) {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "diff";
+        b.dataset.category = group.category;
+        b.dataset.value = opt.value;
+        b.setAttribute("aria-pressed", cosmetics[group.category] === opt.value ? "true" : "false");
+        b.innerHTML = `<b>${opt.label}</b><span>${opt.value === group.defaultValue ? "Бесплатно" : "Куплено"}</span>`;
+        row.append(b);
+      }
+      wrap.append(title, row);
+      cosmeticsEl.append(wrap);
+    }
+    cosmeticsEl.hidden = cosmeticsEl.children.length === 0;
+  }
+
+  buildDiffs();
+  buildCosmetics();
+
+  getProfile()
+    .then((p) => {
+      if (gone) return;
+      profile = p;
+      buildDiffs();
+      buildCosmetics();
+    })
+    .catch((err) => console.error("Не удалось прочитать профиль", err));
 
   diffsEl.addEventListener("click", (e) => {
     const btn = e.target.closest(".diff");
     if (!btn) return;
+    if (btn.classList.contains("diff-locked")) {
+      showToast("Эта сложность закрыта — купите её в магазине");
+      return;
+    }
     selected = DIFFICULTIES.find((d) => d.id === btn.dataset.id);
     diffsEl.querySelectorAll(".diff").forEach((el) => {
+      el.setAttribute("aria-pressed", el === btn ? "true" : "false");
+    });
+  });
+
+  cosmeticsEl.addEventListener("click", (e) => {
+    const btn = e.target.closest(".diff");
+    if (!btn || !btn.dataset.category) return;
+    const category = btn.dataset.category;
+    cosmetics[category] = btn.dataset.value;
+    cosmeticsEl.querySelectorAll(`.diff[data-category="${category}"]`).forEach((el) => {
       el.setAttribute("aria-pressed", el === btn ? "true" : "false");
     });
   });
@@ -92,6 +176,9 @@ export function renderCreate(root) {
         viewport: null,
         completed: false,
         dollars: selected.dollars,
+        pieceStyle: cosmetics.pieceStyle,
+        colorTheme: cosmetics.colorTheme,
+        mergeEffect: cosmetics.mergeEffect,
         image: prepared.image,
       };
       await savePuzzle(puzzle);

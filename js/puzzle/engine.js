@@ -1,6 +1,8 @@
 import { buildPieces } from "./jigsaw.js";
-import { playSnap } from "../audio.js";
-import { dollarsForPieces } from "../ui.js";
+import { playSnap, playBubble, playBell, playFart } from "../audio.js";
+import { dollarsForPieces, COLOR_THEMES, MERGE_EFFECTS, HINT_COST, HINT_DURATION_MS } from "../ui.js";
+
+const SOUND_BY_EFFECT = { snap: playSnap, bubble: playBubble, bell: playBell, fart: playFart };
 
 const MIN_SCALE = 0.18;
 const MAX_SCALE = 5.5;
@@ -18,7 +20,7 @@ function neighbors(a, b) {
 }
 
 export class PuzzleEngine {
-  constructor(canvas, puzzle, image, { onChange, onComplete }) {
+  constructor(canvas, puzzle, image, { onChange, onComplete, onHintChange }) {
     this.canvas = canvas;
     this.ctx = canvas.getContext("2d");
     this.hitCtx = document.createElement("canvas").getContext("2d");
@@ -26,8 +28,13 @@ export class PuzzleEngine {
     this.image = image;
     this.onChange = onChange;
     this.onComplete = onComplete;
+    this.onHintChange = onHintChange;
+    // Косметика из магазина: за пределами купленного каталога — бесплатный
+    // дефолт (случайный микс форм, кремовая доска, искры при стыковке).
+    this.theme = COLOR_THEMES[puzzle.colorTheme] || COLOR_THEMES.classic;
+    this.mergeEffect = puzzle.mergeEffect || "sparks";
 
-    const built = buildPieces(image, puzzle.rows, puzzle.cols, puzzle.seed);
+    const built = buildPieces(image, puzzle.rows, puzzle.cols, puzzle.seed, puzzle.pieceStyle);
     this.pieces = built.pieces;
     this.pieceById = new Map(built.pieces.map((p) => [p.id, p]));
     this.cellW = built.cellW;
@@ -56,6 +63,7 @@ export class PuzzleEngine {
     this.panning = false;
     this.pinch = null;
     this.saveTimer = 0;
+    this.hintTimer = 0;
 
     this.boundDown = (e) => this.onDown(e);
     this.boundMove = (e) => this.onMove(e);
@@ -272,7 +280,6 @@ export class PuzzleEngine {
         changed = true;
         this.dollars += 5;
         this.spawnBurst(contactX, contactY);
-        playSnap();
         break;
       }
       if (this.isLoneCorner(group)) {
@@ -347,9 +354,25 @@ export class PuzzleEngine {
     this.saveTimer = setTimeout(send, 300);
   }
 
-  setHint(on) {
-    this.hint = on;
+  // Подсказка теперь платная: списывает HINT_COST с живого счётчика $
+  // этого пазла (не с общего банка) и включается ровно на HINT_DURATION_MS,
+  // после чего гасится сама. Повторный вызов, пока подсказка уже активна,
+  // игнорируется — без повторного списания.
+  activateHint() {
+    if (this.hint) return false;
+    if (this.dollars < HINT_COST) return false;
+    this.dollars -= HINT_COST;
+    this.hint = true;
     this.dirty = true;
+    this.emit(true);
+    this.onHintChange?.(true);
+    clearTimeout(this.hintTimer);
+    this.hintTimer = setTimeout(() => {
+      this.hint = false;
+      this.dirty = true;
+      this.onHintChange?.(false);
+    }, HINT_DURATION_MS);
+    return true;
   }
 
   // Бюджет $ тикает вниз раз в секунду, но только пока пазл не собран и
@@ -373,7 +396,9 @@ export class PuzzleEngine {
 
   spawnBurst(x, y) {
     const now = performance.now();
-    const colors = ["#ff7a59", "#ffd56b", "#7ee0c6", "#ff5fa2", "#ffffff"];
+    const effect = MERGE_EFFECTS[this.mergeEffect] || MERGE_EFFECTS.sparks;
+    const colors = effect.colors;
+    (SOUND_BY_EFFECT[effect.sound] || playSnap)();
     const cellMin = Math.min(this.cellW, this.cellH);
     const travel = Math.max(14, cellMin * 0.32);
     const count = 12;
@@ -684,8 +709,8 @@ export class PuzzleEngine {
   drawBoard(ctx) {
     const r = Math.min(this.cellW, this.cellH) * 0.08;
     ctx.save();
-    ctx.fillStyle = "rgba(255, 247, 238, 0.92)";
-    ctx.strokeStyle = "rgba(255, 122, 89, 0.55)";
+    ctx.fillStyle = this.theme.fill;
+    ctx.strokeStyle = this.theme.stroke;
     ctx.lineWidth = Math.max(4, Math.min(this.cellW, this.cellH) * 0.045);
     roundRect(ctx, 0, 0, this.boardW, this.boardH, r);
     ctx.fill();
@@ -702,6 +727,7 @@ export class PuzzleEngine {
   destroy() {
     cancelAnimationFrame(this.raf);
     clearTimeout(this.saveTimer);
+    clearTimeout(this.hintTimer);
     this.canvas.removeEventListener("pointerdown", this.boundDown);
     this.canvas.removeEventListener("pointermove", this.boundMove);
     this.canvas.removeEventListener("pointerup", this.boundUp);

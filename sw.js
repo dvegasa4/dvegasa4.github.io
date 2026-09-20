@@ -1,4 +1,4 @@
-const CACHE = "puzzles-shell-v11";
+const CACHE = "puzzles-shell-v13";
 const ASSETS = [
   "./",
   "./index.html",
@@ -13,6 +13,7 @@ const ASSETS = [
   "./js/screens/home.js",
   "./js/screens/create.js",
   "./js/screens/play.js",
+  "./js/screens/shop.js",
   "./icons/icon.svg",
   "./icons/icon-192.png",
   "./icons/icon-512.png",
@@ -43,19 +44,31 @@ self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
   if (url.origin !== location.origin) return;
 
+  // Network-first: пока есть сеть — всегда отдаём и кэшируем самую свежую
+  // версию файла. Раньше здесь был stale-while-revalidate (сначала кэш,
+  // сеть — только фоном), из-за чего любое изменение JS/CSS проявлялось
+  // только со второго обновления страницы: на первом всё ещё отдавался
+  // старый закэшированный код. Офлайн-доступность не страдает — при
+  // обрыве сети мы всё так же падаем на кэш (а для навигаций — на
+  // index.html), просто сеть теперь имеет приоритет, когда она доступна.
   event.respondWith(
     (async () => {
-      const cached = await caches.match(event.request);
-      const updater = fetch(event.request)
-        .then((res) => {
-          if (res && res.ok) {
-            const copy = res.clone();
-            caches.open(CACHE).then((cache) => cache.put(event.request, copy));
-          }
-          return res;
-        })
-        .catch(() => cached || (event.request.mode === "navigate" ? caches.match("./index.html") : undefined));
-      return cached || updater;
+      try {
+        const res = await fetch(event.request);
+        if (res && res.ok) {
+          const copy = res.clone();
+          caches.open(CACHE).then((cache) => cache.put(event.request, copy));
+        }
+        return res;
+      } catch {
+        const cached = await caches.match(event.request);
+        if (cached) return cached;
+        if (event.request.mode === "navigate") {
+          const shell = await caches.match("./index.html");
+          if (shell) return shell;
+        }
+        throw new Error("offline and not cached");
+      }
     })()
   );
 });

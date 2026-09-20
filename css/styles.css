@@ -78,6 +78,7 @@ a {
 .topbar {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 10px;
   margin-bottom: 18px;
 }
@@ -378,9 +379,67 @@ a {
   font-size: 0.85rem;
 }
 
+.diff-locked {
+  display: block;
+  text-decoration: none;
+  opacity: 0.68;
+  background: var(--card);
+  border-style: dashed;
+  border-color: rgba(58, 42, 36, 0.25);
+}
+
+.diff-locked:active {
+  opacity: 0.85;
+}
+
+.cosmetic-group {
+  margin-bottom: 16px;
+}
+
+.shop-section-title {
+  margin: 22px 0 10px;
+  font-size: 1.05rem;
+  color: var(--ink);
+}
+
+.shop-section:first-of-type .shop-section-title {
+  margin-top: 4px;
+}
+
+.shop-item {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  align-items: center;
+  background: var(--card);
+  border-radius: var(--radius);
+  padding: 14px;
+  box-shadow: var(--shadow);
+}
+
+.shop-item h3 {
+  margin: 0 0 4px;
+  font-size: 1rem;
+}
+
+.shop-item p {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 0.85rem;
+  line-height: 1.3;
+}
+
+.shop-item .btn {
+  min-height: 40px;
+  min-width: 118px;
+  padding: 0 14px;
+  white-space: nowrap;
+}
+
 .play-bar {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   padding: calc(8px + var(--safe-t)) calc(10px + var(--safe-r)) 8px calc(10px + var(--safe-l));
   background: rgba(255, 247, 238, 0.88);

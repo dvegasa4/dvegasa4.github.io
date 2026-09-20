@@ -44,6 +44,12 @@ export function renderHome(root) {
         <h1>Пазлы</h1>
         <div class="pill pill-stars">★ ${profile.stars}</div>
         <div class="pill pill-dollars">$ ${profile.dollars}</div>
+        <a class="icon-btn" href="#/shop" aria-label="Магазин" title="Магазин">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#3a2a24" stroke-width="2">
+            <path d="M6 8h12l-1 12H7L6 8z"/>
+            <path d="M9 8a3 3 0 0 1 6 0"/>
+          </svg>
+        </a>
       </div>
       <p class="sub">Загрузите фото и соберите его кусочками. Прогресс остаётся на этом телефоне.</p>
       <a class="btn btn-block" href="#/new">Новый пазл</a>
