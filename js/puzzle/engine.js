@@ -1,0 +1,523 @@
+import { buildPieces } from "./jigsaw.js";
+
+const MIN_SCALE = 0.18;
+const MAX_SCALE = 5.5;
+
+function clamp(v, a, b) {
+  return Math.max(a, Math.min(b, v));
+}
+
+function dist(ax, ay, bx, by) {
+  return Math.hypot(ax - bx, ay - by);
+}
+
+function neighbors(a, b) {
+  return Math.abs(a.row - b.row) + Math.abs(a.col - b.col) === 1;
+}
+
+export class PuzzleEngine {
+  constructor(canvas, puzzle, image, { onChange, onComplete }) {
+    this.canvas = canvas;
+    this.ctx = canvas.getContext("2d");
+    this.hitCtx = document.createElement("canvas").getContext("2d");
+    this.puzzle = puzzle;
+    this.image = image;
+    this.onChange = onChange;
+    this.onComplete = onComplete;
+
+    const built = buildPieces(image, puzzle.rows, puzzle.cols, puzzle.seed);
+    this.pieces = built.pieces;
+    this.pieceById = new Map(built.pieces.map((p) => [p.id, p]));
+    this.cellW = built.cellW;
+    this.cellH = built.cellH;
+    this.boardW = built.boardW;
+    this.boardH = built.boardH;
+    this.snapDist = Math.min(built.cellW, built.cellH) * 0.2;
+
+    this.hint = false;
+    this.completed = !!puzzle.completed;
+    this.view = puzzle.viewport
+      ? { ...puzzle.viewport }
+      : { x: 0, y: 0, scale: 1 };
+    this.groups = this.restoreGroups(puzzle.groups);
+    this.dirty = true;
+    this.raf = 0;
+    this.pointers = new Map();
+    this.drag = null;
+    this.panning = false;
+    this.pinch = null;
+    this.saveTimer = 0;
+
+    this.boundDown = (e) => this.onDown(e);
+    this.boundMove = (e) => this.onMove(e);
+    this.boundUp = (e) => this.onUp(e);
+    this.boundWheel = (e) => this.onWheel(e);
+    this.boundResize = () => this.resize();
+
+    canvas.addEventListener("pointerdown", this.boundDown);
+    canvas.addEventListener("pointermove", this.boundMove);
+    canvas.addEventListener("pointerup", this.boundUp);
+    canvas.addEventListener("pointercancel", this.boundUp);
+    canvas.addEventListener("contextmenu", (e) => e.preventDefault());
+    window.addEventListener("resize", this.boundResize);
+
+    this.resize();
+    if (!puzzle.groups || puzzle.groups.length === 0) {
+      this.scatter();
+      this.fitAll();
+      this.emit(true);
+    } else if (!puzzle.viewport) {
+      this.fitAll();
+    }
+
+    const loop = () => {
+      this.raf = requestAnimationFrame(loop);
+      if (this.dirty) {
+        this.draw();
+        this.dirty = false;
+      }
+    };
+    this.raf = requestAnimationFrame(loop);
+  }
+
+  restoreGroups(saved) {
+    const n = this.puzzle.rows * this.puzzle.cols;
+    if (!saved || saved.length === 0) {
+      return Array.from({ length: n }, (_, id) => ({
+        pieceIds: [id],
+        originX: 0,
+        originY: 0,
+      }));
+    }
+    return saved.map((g) => ({
+      pieceIds: [...g.pieceIds],
+      originX: g.x,
+      originY: g.y,
+    }));
+  }
+
+  scatter() {
+    const rand = () => Math.random();
+    this.groups = this.pieces.map((piece) => {
+      const side = rand();
+      let px;
+      let py;
+      if (side < 0.34) {
+        px = -this.cellW * (0.4 + rand() * 1.6);
+        py = rand() * this.boardH * 1.15 - this.cellH * 0.2;
+      } else if (side < 0.68) {
+        px = this.boardW + this.cellW * (0.2 + rand() * 1.4);
+        py = rand() * this.boardH * 1.15 - this.cellH * 0.2;
+      } else {
+        px = rand() * this.boardW - this.cellW * 0.2;
+        py = this.boardH + this.cellH * (0.3 + rand() * 1.5);
+      }
+      return {
+        pieceIds: [piece.id],
+        originX: px - piece.col * this.cellW,
+        originY: py - piece.row * this.cellH,
+      };
+    });
+  }
+
+  bounds() {
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const group of this.groups) {
+      for (const id of group.pieceIds) {
+        const p = this.pieceById.get(id);
+        const x = group.originX + p.col * this.cellW - p.pad;
+        const y = group.originY + p.row * this.cellH - p.pad;
+        minX = Math.min(minX, x);
+        minY = Math.min(minY, y);
+        maxX = Math.max(maxX, x + p.bitmap.width);
+        maxY = Math.max(maxY, y + p.bitmap.height);
+      }
+    }
+    minX = Math.min(minX, -40);
+    minY = Math.min(minY, -40);
+    maxX = Math.max(maxX, this.boardW + 40);
+    maxY = Math.max(maxY, this.boardH + 40);
+    return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+  }
+
+  fitAll() {
+    const b = this.bounds();
+    const w = this.canvas.clientWidth || 1;
+    const h = this.canvas.clientHeight || 1;
+    const pad = 28;
+    const scale = clamp(Math.min((w - pad * 2) / b.w, (h - pad * 2) / b.h) * 0.96, MIN_SCALE, 1.4);
+    this.view.scale = scale;
+    this.view.x = (w - b.w * scale) / 2 - b.x * scale;
+    this.view.y = (h - b.h * scale) / 2 - b.y * scale;
+    this.dirty = true;
+  }
+
+  resize() {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2.5);
+    const w = this.canvas.clientWidth || 1;
+    const h = this.canvas.clientHeight || 1;
+    this.canvas.width = Math.round(w * dpr);
+    this.canvas.height = Math.round(h * dpr);
+    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    this.dirty = true;
+  }
+
+  screenToWorld(clientX, clientY) {
+    const rect = this.canvas.getBoundingClientRect();
+    const sx = clientX - rect.left;
+    const sy = clientY - rect.top;
+    return {
+      x: (sx - this.view.x) / this.view.scale,
+      y: (sy - this.view.y) / this.view.scale,
+      sx,
+      sy,
+    };
+  }
+
+  piecePos(group, piece) {
+    return {
+      x: group.originX + piece.col * this.cellW,
+      y: group.originY + piece.row * this.cellH,
+    };
+  }
+
+  hitTest(wx, wy) {
+    for (let i = this.groups.length - 1; i >= 0; i--) {
+      const group = this.groups[i];
+      for (const id of group.pieceIds) {
+        const piece = this.pieceById.get(id);
+        const pos = this.piecePos(group, piece);
+        const lx = wx - pos.x;
+        const ly = wy - pos.y;
+        if (this.hitCtx.isPointInPath(piece.path, lx, ly)) {
+          return { group, index: i, piece };
+        }
+      }
+    }
+    return null;
+  }
+
+  bringToFront(group) {
+    const i = this.groups.indexOf(group);
+    if (i >= 0 && i !== this.groups.length - 1) {
+      this.groups.splice(i, 1);
+      this.groups.push(group);
+    }
+  }
+
+  groupsNeighbor(a, b) {
+    for (const idA of a.pieceIds) {
+      const pa = this.pieceById.get(idA);
+      for (const idB of b.pieceIds) {
+        const pb = this.pieceById.get(idB);
+        if (neighbors(pa, pb)) return true;
+      }
+    }
+    return false;
+  }
+
+  trySnap(group) {
+    let changed = false;
+    let guard = 0;
+    while (guard++ < 80) {
+      let merged = false;
+      for (const other of this.groups) {
+        if (other === group) continue;
+        if (!this.groupsNeighbor(group, other)) continue;
+        if (dist(group.originX, group.originY, other.originX, other.originY) > this.snapDist) {
+          continue;
+        }
+        group.originX = other.originX;
+        group.originY = other.originY;
+        group.pieceIds.push(...other.pieceIds);
+        this.groups = this.groups.filter((g) => g !== other);
+        merged = true;
+        changed = true;
+        break;
+      }
+      const toBoard = dist(group.originX, group.originY, 0, 0);
+      if (toBoard > 0.01 && toBoard <= this.snapDist) {
+        group.originX = 0;
+        group.originY = 0;
+        changed = true;
+        continue;
+      }
+      if (!merged) break;
+    }
+    if (changed) {
+      try {
+        navigator.vibrate?.(14);
+      } catch {
+        /* ignore */
+      }
+      this.checkComplete();
+      if (!this.completed) this.emit(true);
+    }
+    return changed;
+  }
+
+  checkComplete() {
+    const n = this.pieces.length;
+    if (this.groups.length === 1 && this.groups[0].pieceIds.length === n) {
+      this.groups[0].originX = 0;
+      this.groups[0].originY = 0;
+      if (!this.completed) {
+        this.completed = true;
+        this.drag = null;
+        this.panning = false;
+        this.emit(true);
+        this.onComplete?.();
+      }
+    }
+  }
+
+  progress() {
+    const n = this.pieces.length;
+    if (this.completed) return 100;
+    if (n <= 1) return 100;
+    return Math.round(((n - this.groups.length) / (n - 1)) * 100);
+  }
+
+  snapshot() {
+    return {
+      groups: this.groups.map((g) => ({
+        pieceIds: [...g.pieceIds],
+        x: g.originX,
+        y: g.originY,
+      })),
+      viewport: { ...this.view },
+      completed: this.completed,
+    };
+  }
+
+  emit(immediate = false) {
+    const send = () => {
+      this.saveTimer = 0;
+      this.onChange?.(this.snapshot());
+    };
+    if (immediate) {
+      clearTimeout(this.saveTimer);
+      send();
+      return;
+    }
+    clearTimeout(this.saveTimer);
+    this.saveTimer = setTimeout(send, 300);
+  }
+
+  setHint(on) {
+    this.hint = on;
+    this.dirty = true;
+  }
+
+  onDown(e) {
+    e.preventDefault();
+    this.canvas.setPointerCapture(e.pointerId);
+    const w = this.screenToWorld(e.clientX, e.clientY);
+    this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, sx: w.sx, sy: w.sy });
+
+    if (this.pointers.size === 2) {
+      this.drag = null;
+      this.panning = false;
+      this.startPinch();
+      return;
+    }
+
+    if (this.completed) {
+      this.panning = true;
+      this._lastPanX = e.clientX;
+      this._lastPanY = e.clientY;
+      return;
+    }
+
+    const hit = this.hitTest(w.x, w.y);
+    if (hit) {
+      this.bringToFront(hit.group);
+      this.panning = false;
+      this.drag = {
+        pointerId: e.pointerId,
+        group: hit.group,
+        lastX: w.x,
+        lastY: w.y,
+      };
+      this.dirty = true;
+    } else {
+      this.panning = true;
+      this._lastPanX = e.clientX;
+      this._lastPanY = e.clientY;
+    }
+  }
+
+  onMove(e) {
+    if (!this.pointers.has(e.pointerId)) return;
+    e.preventDefault();
+    const w = this.screenToWorld(e.clientX, e.clientY);
+    this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, sx: w.sx, sy: w.sy });
+
+    if (this.pointers.size >= 2 && this.pinch) {
+      this.updatePinch();
+      return;
+    }
+
+    if (this.drag && e.pointerId === this.drag.pointerId) {
+      const dx = w.x - this.drag.lastX;
+      const dy = w.y - this.drag.lastY;
+      this.drag.group.originX += dx;
+      this.drag.group.originY += dy;
+      this.drag.lastX = w.x;
+      this.drag.lastY = w.y;
+      this.trySnap(this.drag.group);
+      this.dirty = true;
+      return;
+    }
+
+    if (this.panning && this.pointers.size === 1) {
+      this.view.x += e.clientX - this._lastPanX;
+      this.view.y += e.clientY - this._lastPanY;
+      this._lastPanX = e.clientX;
+      this._lastPanY = e.clientY;
+      this.dirty = true;
+    }
+  }
+
+  onUp(e) {
+    if (!this.pointers.has(e.pointerId)) return;
+    this.pointers.delete(e.pointerId);
+    try {
+      this.canvas.releasePointerCapture(e.pointerId);
+    } catch {
+      /* ignore */
+    }
+
+    if (this.pointers.size < 2) this.pinch = null;
+    if (this.pointers.size === 0) {
+      if (this.drag) this.trySnap(this.drag.group);
+      this.drag = null;
+      this.panning = false;
+      this._lastPanX = null;
+      this._lastPanY = null;
+      this.emit();
+    } else if (this.pointers.size === 1) {
+      const left = [...this.pointers.values()][0];
+      this.panning = true;
+      this._lastPanX = left.x;
+      this._lastPanY = left.y;
+    }
+    this.dirty = true;
+  }
+
+  startPinch() {
+    const pts = [...this.pointers.values()];
+    const d = dist(pts[0].sx, pts[0].sy, pts[1].sx, pts[1].sy);
+    const cx = (pts[0].sx + pts[1].sx) / 2;
+    const cy = (pts[0].sy + pts[1].sy) / 2;
+    this.pinch = {
+      dist: d || 1,
+      wx: (cx - this.view.x) / this.view.scale,
+      wy: (cy - this.view.y) / this.view.scale,
+    };
+  }
+
+  updatePinch() {
+    const pts = [...this.pointers.values()];
+    if (pts.length < 2 || !this.pinch) return;
+    const d = dist(pts[0].sx, pts[0].sy, pts[1].sx, pts[1].sy) || 1;
+    const cx = (pts[0].sx + pts[1].sx) / 2;
+    const cy = (pts[0].sy + pts[1].sy) / 2;
+    const scale = clamp(this.view.scale * (d / this.pinch.dist), MIN_SCALE, MAX_SCALE);
+    this.view.scale = scale;
+    this.view.x = cx - this.pinch.wx * scale;
+    this.view.y = cy - this.pinch.wy * scale;
+    this.pinch.dist = d;
+    this.pinch.wx = (cx - this.view.x) / this.view.scale;
+    this.pinch.wy = (cy - this.view.y) / this.view.scale;
+    this.dirty = true;
+  }
+
+  onWheel(e) {
+    e.preventDefault();
+    const w = this.screenToWorld(e.clientX, e.clientY);
+    const factor = e.deltaY < 0 ? 1.09 : 0.91;
+    const scale = clamp(this.view.scale * factor, MIN_SCALE, MAX_SCALE);
+    this.view.scale = scale;
+    this.view.x = w.sx - w.x * scale;
+    this.view.y = w.sy - w.y * scale;
+    this.dirty = true;
+    this.emit();
+  }
+
+  draw() {
+    const ctx = this.ctx;
+    const w = this.canvas.clientWidth;
+    const h = this.canvas.clientHeight;
+    ctx.clearRect(0, 0, w, h);
+    ctx.save();
+    ctx.translate(this.view.x, this.view.y);
+    ctx.scale(this.view.scale, this.view.scale);
+
+    this.drawBoard(ctx);
+
+    for (const group of this.groups) {
+      const dragging = this.drag && this.drag.group === group;
+      for (const id of group.pieceIds) {
+        const piece = this.pieceById.get(id);
+        const pos = this.piecePos(group, piece);
+        if (dragging) {
+          ctx.save();
+          ctx.shadowColor = "rgba(58,42,36,0.32)";
+          ctx.shadowBlur = 16 / this.view.scale;
+          ctx.shadowOffsetY = 6 / this.view.scale;
+          ctx.drawImage(piece.bitmap, pos.x - piece.pad, pos.y - piece.pad);
+          ctx.restore();
+        } else {
+          ctx.drawImage(piece.bitmap, pos.x - piece.pad, pos.y - piece.pad);
+        }
+      }
+    }
+    ctx.restore();
+  }
+
+  drawBoard(ctx) {
+    const r = Math.min(this.cellW, this.cellH) * 0.08;
+    ctx.save();
+    ctx.fillStyle = "rgba(255, 247, 238, 0.92)";
+    ctx.strokeStyle = "rgba(255, 122, 89, 0.55)";
+    ctx.lineWidth = Math.max(4, Math.min(this.cellW, this.cellH) * 0.045);
+    roundRect(ctx, 0, 0, this.boardW, this.boardH, r);
+    ctx.fill();
+    ctx.stroke();
+    if (this.hint) {
+      ctx.save();
+      ctx.globalAlpha = 0.28;
+      ctx.drawImage(this.image, 0, 0, this.boardW, this.boardH);
+      ctx.restore();
+    }
+    ctx.restore();
+  }
+
+  destroy() {
+    cancelAnimationFrame(this.raf);
+    clearTimeout(this.saveTimer);
+    this.canvas.removeEventListener("pointerdown", this.boundDown);
+    this.canvas.removeEventListener("pointermove", this.boundMove);
+    this.canvas.removeEventListener("pointerup", this.boundUp);
+    this.canvas.removeEventListener("pointercancel", this.boundUp);
+    this.canvas.removeEventListener("wheel", this.boundWheel);
+    window.removeEventListener("resize", this.boundResize);
+    this.emit(true);
+    if (this.image && this.image.close) this.image.close();
+  }
+}
+
+function roundRect(ctx, x, y, w, h, r) {
+  const radius = Math.min(r, w / 2, h / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + radius, y);
+  ctx.arcTo(x + w, y, x + w, y + h, radius);
+  ctx.arcTo(x + w, y + h, x, y + h, radius);
+  ctx.arcTo(x, y + h, x, y, radius);
+  ctx.arcTo(x, y, x + w, y, radius);
+  ctx.closePath();
+}
