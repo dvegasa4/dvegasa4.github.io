@@ -95,19 +95,19 @@ export function isQuotaError(err) {
   return err.name === "QuotaExceededError" || err.code === 22;
 }
 
-const emptyProfile = () => ({ id: PROFILE_ID, stars: 0, completedCount: 0 });
+const emptyProfile = () => ({ id: PROFILE_ID, stars: 0, dollars: 0, completedCount: 0 });
 
 export async function getProfile() {
   const db = await openDb();
   const tx = db.transaction(PROFILE, "readonly");
   const rec = await reqToPromise(tx.objectStore(PROFILE).get(PROFILE_ID));
-  return rec || emptyProfile();
+  return rec ? { ...emptyProfile(), ...rec } : emptyProfile();
 }
 
-// Начисляет звёзды за пазл ровно один раз (флаг starsAwarded в записи пазла
-// защищает от повторного начисления, если пользователь просто открыл уже
-// собранный пазл снова).
-export async function awardCompletion(puzzleId, amount) {
+// Начисляет звёзды и оставшиеся доллары за пазл ровно один раз (флаг
+// starsAwarded в записи пазла защищает от повторного начисления, если
+// пользователь просто открыл уже собранный пазл снова).
+export async function awardCompletion(puzzleId, { stars, dollars }) {
   const db = await openDb();
   const tx = db.transaction([META, PROFILE], "readwrite");
   const metaStore = tx.objectStore(META);
@@ -124,10 +124,11 @@ export async function awardCompletion(puzzleId, amount) {
   meta.updatedAt = Date.now();
   metaStore.put(meta);
 
-  const current = (await reqToPromise(profileStore.get(PROFILE_ID))) || emptyProfile();
+  const current = { ...emptyProfile(), ...((await reqToPromise(profileStore.get(PROFILE_ID))) || {}) };
   const updated = {
     id: PROFILE_ID,
-    stars: current.stars + amount,
+    stars: current.stars + stars,
+    dollars: current.dollars + dollars,
     completedCount: current.completedCount + 1,
   };
   profileStore.put(updated);

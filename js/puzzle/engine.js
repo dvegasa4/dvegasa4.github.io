@@ -1,5 +1,6 @@
 import { buildPieces } from "./jigsaw.js";
 import { playSnap } from "../audio.js";
+import { dollarsForPieces } from "../ui.js";
 
 const MIN_SCALE = 0.18;
 const MAX_SCALE = 5.5;
@@ -41,11 +42,15 @@ export class PuzzleEngine {
       ? { ...puzzle.viewport }
       : { x: 0, y: 0, scale: 1 };
     this.groups = this.restoreGroups(puzzle.groups);
+    this.dollars =
+      typeof puzzle.dollars === "number" ? puzzle.dollars : dollarsForPieces(this.pieces.length);
+    this.dollarTickAt = performance.now();
     this.dirty = true;
     this.raf = 0;
     this.sparks = [];
     this.rings = [];
     this.confetti = [];
+    this.floaters = [];
     this.pointers = new Map();
     this.drag = null;
     this.panning = false;
@@ -77,7 +82,12 @@ export class PuzzleEngine {
 
     const loop = (now) => {
       this.raf = requestAnimationFrame(loop);
-      const animating = this.sparks.length > 0 || this.rings.length > 0 || this.confetti.length > 0;
+      this.tickDollars(now);
+      const animating =
+        this.sparks.length > 0 ||
+        this.rings.length > 0 ||
+        this.confetti.length > 0 ||
+        this.floaters.length > 0;
       if (this.dirty || animating) {
         this.draw(now);
         this.dirty = animating;
@@ -260,6 +270,7 @@ export class PuzzleEngine {
         this.groups = this.groups.filter((g) => g !== other);
         merged = true;
         changed = true;
+        this.dollars += 5;
         this.spawnBurst(contactX, contactY);
         playSnap();
         break;
@@ -318,6 +329,7 @@ export class PuzzleEngine {
       })),
       viewport: { ...this.view },
       completed: this.completed,
+      dollars: this.dollars,
     };
   }
 
@@ -338,6 +350,25 @@ export class PuzzleEngine {
   setHint(on) {
     this.hint = on;
     this.dirty = true;
+  }
+
+  // Бюджет $ тикает вниз раз в секунду, но только пока пазл не собран и
+  // экран реально открыт и виден (иначе — просто сбрасываем якорь времени,
+  // чтобы не "нагонять" секунды за время, когда вкладка была свёрнута).
+  tickDollars(now) {
+    if (this.completed || document.visibilityState !== "visible") {
+      this.dollarTickAt = now;
+      return;
+    }
+    let ticked = false;
+    while (now - this.dollarTickAt >= 1000) {
+      this.dollarTickAt += 1000;
+      if (this.dollars > 0) {
+        this.dollars = Math.max(0, this.dollars - 1);
+        ticked = true;
+      }
+    }
+    if (ticked) this.emit();
   }
 
   spawnBurst(x, y) {
@@ -361,6 +392,7 @@ export class PuzzleEngine {
       });
     }
     this.rings.push({ x, y, start: now, life: 400, maxR: travel * 0.95 });
+    this.floaters.push({ x, y, text: "+5 $", start: now, life: 900 });
     this.dirty = true;
   }
 
@@ -423,6 +455,27 @@ export class PuzzleEngine {
         ctx.beginPath();
         ctx.arc(x, y, Math.max(0.4, s.size * (1 - t * 0.35)), 0, Math.PI * 2);
         ctx.fill();
+        ctx.restore();
+      }
+    }
+    if (this.floaters.length) {
+      const rise = Math.min(this.cellW, this.cellH) * 0.9;
+      const fontSize = Math.max(11, this.cellH * 0.24);
+      this.floaters = this.floaters.filter((f) => now - f.start < f.life);
+      for (const f of this.floaters) {
+        const t = (now - f.start) / f.life;
+        const ease = 1 - (1 - t) * (1 - t);
+        const y = f.y - rise * ease;
+        ctx.save();
+        ctx.globalAlpha = Math.max(0, 1 - t * t);
+        ctx.font = `800 ${fontSize}px ui-rounded, "Trebuchet MS", sans-serif`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.lineWidth = Math.max(2, fontSize * 0.16);
+        ctx.strokeStyle = "rgba(255,255,255,0.9)";
+        ctx.strokeText(f.text, f.x, y);
+        ctx.fillStyle = "#2f9e5b";
+        ctx.fillText(f.text, f.x, y);
         ctx.restore();
       }
     }

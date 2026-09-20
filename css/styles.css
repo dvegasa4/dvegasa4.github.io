@@ -123,7 +123,13 @@ a {
   color: #6b4a12;
 }
 
-.pill-stars.bump {
+.pill-dollars {
+  background: linear-gradient(180deg, #b6f0cf, var(--mint-deep));
+  color: #0f5c40;
+}
+
+.pill-stars.bump,
+.pill-dollars.bump {
   animation: pillBump 0.4s ease;
 }
 

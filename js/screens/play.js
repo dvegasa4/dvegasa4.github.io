@@ -16,6 +16,7 @@ export function renderPlay(root, id) {
         </svg>
       </button>
       <div class="pill pill-stars" data-stars>★ 0</div>
+      <div class="pill pill-dollars" data-dollars>$ 0</div>
       <div class="pill" data-pct>0%</div>
     </div>
     <div class="play-stage">
@@ -40,7 +41,7 @@ export function renderPlay(root, id) {
         <div class="win-card">
           <h2>Готово!</h2>
           <p>Картинка собралась. Можно начать другой пазл или пересмотреть этот.</p>
-          <p class="earned-stars" data-earned hidden>+<span data-earned-amount>0</span> ★</p>
+          <p class="earned-stars" data-earned hidden>+<span data-earned-amount>0</span> ★ и +<span data-earned-dollars>0</span> $</p>
           <a class="btn btn-block" href="#/">К списку</a>
         </div>
       </div>
@@ -51,6 +52,7 @@ export function renderPlay(root, id) {
   const canvas = screen.querySelector("canvas");
   const pctEl = screen.querySelector("[data-pct]");
   const starsEl = screen.querySelector("[data-stars]");
+  const dollarsEl = screen.querySelector("[data-dollars]");
   const hintBtn = screen.querySelector("[data-hint]");
   const loadingEl = screen.querySelector("[data-loading]");
   const errorEl = screen.querySelector("[data-error]");
@@ -58,6 +60,7 @@ export function renderPlay(root, id) {
   const winEl = screen.querySelector("[data-win]");
   const earnedEl = screen.querySelector("[data-earned]");
   const earnedAmountEl = screen.querySelector("[data-earned-amount]");
+  const earnedDollarsEl = screen.querySelector("[data-earned-dollars]");
 
   let engine = null;
   let gone = false;
@@ -167,6 +170,7 @@ export function renderPlay(root, id) {
     const updatePct = (state) => {
       const pct = progressOf({ cols: puzzle.cols, rows: puzzle.rows, groups: state.groups, completed: state.completed });
       pctEl.textContent = `${pct}%`;
+      if (typeof state.dollars === "number") dollarsEl.textContent = `$ ${state.dollars}`;
     };
 
     try {
@@ -178,11 +182,15 @@ export function renderPlay(root, id) {
         onComplete() {
           pctEl.textContent = "100%";
           clearTimeout(winTimer);
-          // Звёзды начисляем сразу и надёжно (не зависит от того, останется
-          // ли пользователь на экране все 5 секунд до появления "Готово!").
-          const amount = starsForPieces(puzzle.cols * puzzle.rows);
-          const awardPromise = awardCompletion(puzzle.id, amount).catch((err) => {
-            console.error("Не удалось начислить звёзды", err);
+          // Начисляем сразу и надёжно (не зависит от того, останется ли
+          // пользователь на экране всю секунду до появления "Готово!").
+          const starsAmount = starsForPieces(puzzle.cols * puzzle.rows);
+          const dollarsAmount = engine.dollars;
+          const awardPromise = awardCompletion(puzzle.id, {
+            stars: starsAmount,
+            dollars: dollarsAmount,
+          }).catch((err) => {
+            console.error("Не удалось начислить награду", err);
             return null;
           });
           winTimer = setTimeout(async () => {
@@ -190,10 +198,12 @@ export function renderPlay(root, id) {
             if (gone) return;
             if (result?.awarded) {
               starsEl.textContent = `★ ${result.profile.stars}`;
+              dollarsEl.textContent = `$ ${dollarsAmount}`;
               starsEl.classList.remove("bump");
               void starsEl.offsetWidth;
               starsEl.classList.add("bump");
-              earnedAmountEl.textContent = String(amount);
+              earnedAmountEl.textContent = String(starsAmount);
+              earnedDollarsEl.textContent = String(dollarsAmount);
               earnedEl.hidden = false;
             }
             engine?.celebrate();

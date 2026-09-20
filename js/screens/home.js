@@ -43,6 +43,7 @@ export function renderHome(root) {
         <div class="logo">${logoSvg}</div>
         <h1>Пазлы</h1>
         <div class="pill pill-stars">★ ${profile.stars}</div>
+        <div class="pill pill-dollars">$ ${profile.dollars}</div>
       </div>
       <p class="sub">Загрузите фото и соберите его кусочками. Прогресс остаётся на этом телефоне.</p>
       <a class="btn btn-block" href="#/new">Новый пазл</a>

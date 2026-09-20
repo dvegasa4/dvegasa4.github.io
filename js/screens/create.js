@@ -37,7 +37,7 @@ export function renderCreate(root) {
     b.className = "diff";
     b.dataset.id = d.id;
     b.setAttribute("aria-pressed", d === selected ? "true" : "false");
-    b.innerHTML = `<b>${d.label}</b><span>${d.pieces} кусочков · +${starsForPieces(d.pieces)} ★</span>`;
+    b.innerHTML = `<b>${d.label}</b><span>${d.pieces} кусочков · +${starsForPieces(d.pieces)}★ · $${d.dollars}</span>`;
     diffsEl.append(b);
   }
 
@@ -91,6 +91,7 @@ export function renderCreate(root) {
         groups: [],
         viewport: null,
         completed: false,
+        dollars: selected.dollars,
         image: prepared.image,
       };
       await savePuzzle(puzzle);
