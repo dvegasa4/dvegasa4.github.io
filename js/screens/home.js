@@ -1,5 +1,5 @@
 import { listPuzzles, deletePuzzle } from "../storage/db.js";
-import { confirmModal, progressOf, formatDate } from "../ui.js";
+import { confirmModal, progressOf, formatDate, showToast } from "../ui.js";
 
 const logoSvg = `
   <svg viewBox="0 0 24 24" fill="#fff" aria-hidden="true">
@@ -16,7 +16,24 @@ export function renderHome(root) {
   root.append(screen);
 
   const paint = async () => {
-    const puzzles = await listPuzzles();
+    let puzzles;
+    try {
+      puzzles = await listPuzzles();
+    } catch (err) {
+      console.error("Не удалось прочитать список пазлов", err);
+      if (gone) return;
+      screen.innerHTML = `
+        <div class="topbar">
+          <div class="logo">${logoSvg}</div>
+          <h1>Пазлы</h1>
+        </div>
+        <div class="empty">
+          <h2>Не получилось открыть хранилище</h2>
+          <p>Обновите страницу или проверьте, включён ли приватный режим браузера.</p>
+        </div>
+      `;
+      return;
+    }
     if (gone) return;
     urls.splice(0).forEach((u) => URL.revokeObjectURL(u));
 
@@ -83,7 +100,13 @@ export function renderHome(root) {
       danger: true,
     });
     if (!ok) return;
-    await deletePuzzle(id);
+    try {
+      await deletePuzzle(id);
+    } catch (err) {
+      console.error("Не удалось удалить пазл", err);
+      showToast("Не получилось удалить пазл");
+      return;
+    }
     paint();
   });
 

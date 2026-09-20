@@ -46,30 +46,30 @@ function appendEdge(path, x1, y1, x2, y2, tab, tabSize, shape) {
   const ty = dy / len;
   const nx = ty * tab;
   const ny = -tx * tab;
-  const size = tabSize * (0.88 + shape * 0.22);
-  const jitter = (shape - 0.5) * 0.1 * len;
-  const mid = len * 0.5 + jitter;
+  const size = tabSize * (0.92 + shape * 0.16);
+  // Всегда ровно посередине ребра: два соседних кусочка меряют "along" от
+  // разных концов одного и того же отрезка, поэтому любое смещение середины
+  // (jitter) физически расходится между выступом и выемкой. Раньше это
+  // приводило к несовпадению вырезов на стыке.
+  const mid = len * 0.5;
 
   const p = (along, bulge) => [
     x1 + tx * along + nx * bulge,
     y1 + ty * along + ny * bulge,
   ];
 
-  const neck = size * 0.85;
+  const neck = size * 0.95;
   path.lineTo(...p(mid - neck, 0));
+  // Простой симметричный округлый выступ из двух кривых — форма читается
+  // яснее, чем прежний вытянутый "блоб" из трёх кривых.
   path.bezierCurveTo(
-    ...p(mid - neck + size * 0.12, 0),
-    ...p(mid - size * 0.52, size * 0.28),
-    ...p(mid - size * 0.48, size * 0.78)
+    ...p(mid - neck * 0.32, 0),
+    ...p(mid - size * 0.62, size * 1.02),
+    ...p(mid, size * 1.05)
   );
   path.bezierCurveTo(
-    ...p(mid - size * 0.95, size * 1.28),
-    ...p(mid + size * 0.95, size * 1.28),
-    ...p(mid + size * 0.48, size * 0.78)
-  );
-  path.bezierCurveTo(
-    ...p(mid + size * 0.52, size * 0.28),
-    ...p(mid + neck - size * 0.12, 0),
+    ...p(mid + size * 0.62, size * 1.02),
+    ...p(mid + neck * 0.32, 0),
     ...p(mid + neck, 0)
   );
   path.lineTo(x2, y2);

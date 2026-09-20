@@ -42,6 +42,8 @@ export class PuzzleEngine {
     this.groups = this.restoreGroups(puzzle.groups);
     this.dirty = true;
     this.raf = 0;
+    this.sparks = [];
+    this.rings = [];
     this.pointers = new Map();
     this.drag = null;
     this.panning = false;
@@ -58,6 +60,7 @@ export class PuzzleEngine {
     canvas.addEventListener("pointermove", this.boundMove);
     canvas.addEventListener("pointerup", this.boundUp);
     canvas.addEventListener("pointercancel", this.boundUp);
+    canvas.addEventListener("wheel", this.boundWheel, { passive: false });
     canvas.addEventListener("contextmenu", (e) => e.preventDefault());
     window.addEventListener("resize", this.boundResize);
 
@@ -70,11 +73,12 @@ export class PuzzleEngine {
       this.fitAll();
     }
 
-    const loop = () => {
+    const loop = (now) => {
       this.raf = requestAnimationFrame(loop);
-      if (this.dirty) {
-        this.draw();
-        this.dirty = false;
+      const animating = this.sparks.length > 0 || this.rings.length > 0;
+      if (this.dirty || animating) {
+        this.draw(now);
+        this.dirty = animating;
       }
     };
     this.raf = requestAnimationFrame(loop);
@@ -208,15 +212,27 @@ export class PuzzleEngine {
     }
   }
 
-  groupsNeighbor(a, b) {
+  findNeighborPair(a, b) {
     for (const idA of a.pieceIds) {
       const pa = this.pieceById.get(idA);
       for (const idB of b.pieceIds) {
         const pb = this.pieceById.get(idB);
-        if (neighbors(pa, pb)) return true;
+        if (neighbors(pa, pb)) return [pa, pb];
       }
     }
-    return false;
+    return null;
+  }
+
+  groupsNeighbor(a, b) {
+    return !!this.findNeighborPair(a, b);
+  }
+
+  isLoneCorner(group) {
+    if (group.pieceIds.length !== 1) return false;
+    const piece = this.pieceById.get(group.pieceIds[0]);
+    const lastRow = this.puzzle.rows - 1;
+    const lastCol = this.puzzle.cols - 1;
+    return (piece.row === 0 || piece.row === lastRow) && (piece.col === 0 || piece.col === lastCol);
   }
 
   trySnap(group) {
@@ -226,24 +242,33 @@ export class PuzzleEngine {
       let merged = false;
       for (const other of this.groups) {
         if (other === group) continue;
-        if (!this.groupsNeighbor(group, other)) continue;
+        const pair = this.findNeighborPair(group, other);
+        if (!pair) continue;
         if (dist(group.originX, group.originY, other.originX, other.originY) > this.snapDist) {
           continue;
         }
+        const [pa, pb] = pair;
+        const posA = this.piecePos(other, pa);
+        const posB = this.piecePos(other, pb);
+        const contactX = (posA.x + posB.x) / 2 + this.cellW / 2;
+        const contactY = (posA.y + posB.y) / 2 + this.cellH / 2;
         group.originX = other.originX;
         group.originY = other.originY;
         group.pieceIds.push(...other.pieceIds);
         this.groups = this.groups.filter((g) => g !== other);
         merged = true;
         changed = true;
+        this.spawnBurst(contactX, contactY);
         break;
       }
-      const toBoard = dist(group.originX, group.originY, 0, 0);
-      if (toBoard > 0.01 && toBoard <= this.snapDist) {
-        group.originX = 0;
-        group.originY = 0;
-        changed = true;
-        continue;
+      if (this.isLoneCorner(group)) {
+        const toBoard = dist(group.originX, group.originY, 0, 0);
+        if (toBoard > 0.01 && toBoard <= this.snapDist) {
+          group.originX = 0;
+          group.originY = 0;
+          changed = true;
+          continue;
+        }
       }
       if (!merged) break;
     }
@@ -312,6 +337,65 @@ export class PuzzleEngine {
     this.dirty = true;
   }
 
+  spawnBurst(x, y) {
+    const now = performance.now();
+    const colors = ["#ff7a59", "#ffd56b", "#7ee0c6", "#ff5fa2", "#ffffff"];
+    const cellMin = Math.min(this.cellW, this.cellH);
+    const travel = Math.max(14, cellMin * 0.32);
+    const count = 12;
+    for (let i = 0; i < count; i++) {
+      const angle = (i / count) * Math.PI * 2 + (Math.random() - 0.5) * 0.5;
+      const d = travel * (0.55 + Math.random() * 0.6);
+      this.sparks.push({
+        x,
+        y,
+        dx: Math.cos(angle) * d,
+        dy: Math.sin(angle) * d,
+        start: now,
+        life: 460 + Math.random() * 240,
+        size: Math.max(1.6, cellMin * 0.05) * (0.7 + Math.random() * 0.6),
+        color: colors[i % colors.length],
+      });
+    }
+    this.rings.push({ x, y, start: now, life: 400, maxR: travel * 0.95 });
+    this.dirty = true;
+  }
+
+  drawFx(ctx, now) {
+    if (this.rings.length) {
+      this.rings = this.rings.filter((r) => now - r.start < r.life);
+      for (const r of this.rings) {
+        const t = (now - r.start) / r.life;
+        const radius = r.maxR * (0.25 + t * 0.85);
+        ctx.save();
+        ctx.globalAlpha = Math.max(0, (1 - t) * 0.55);
+        ctx.strokeStyle = "#fff8ec";
+        ctx.lineWidth = Math.max(1, radius * 0.12);
+        ctx.beginPath();
+        ctx.arc(r.x, r.y, radius, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+      }
+    }
+    if (this.sparks.length) {
+      const rise = Math.min(this.cellW, this.cellH) * 0.06;
+      this.sparks = this.sparks.filter((s) => now - s.start < s.life);
+      for (const s of this.sparks) {
+        const t = (now - s.start) / s.life;
+        const ease = 1 - (1 - t) * (1 - t) * (1 - t);
+        const x = s.x + s.dx * ease;
+        const y = s.y + s.dy * ease - rise * t;
+        ctx.save();
+        ctx.globalAlpha = Math.max(0, 1 - t);
+        ctx.fillStyle = s.color;
+        ctx.beginPath();
+        ctx.arc(x, y, Math.max(0.4, s.size * (1 - t * 0.35)), 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+    }
+  }
+
   onDown(e) {
     e.preventDefault();
     this.canvas.setPointerCapture(e.pointerId);
@@ -368,7 +452,6 @@ export class PuzzleEngine {
       this.drag.group.originY += dy;
       this.drag.lastX = w.x;
       this.drag.lastY = w.y;
-      this.trySnap(this.drag.group);
       this.dirty = true;
       return;
     }
@@ -448,7 +531,7 @@ export class PuzzleEngine {
     this.emit();
   }
 
-  draw() {
+  draw(now = performance.now()) {
     const ctx = this.ctx;
     const w = this.canvas.clientWidth;
     const h = this.canvas.clientHeight;
@@ -476,6 +559,8 @@ export class PuzzleEngine {
         }
       }
     }
+
+    this.drawFx(ctx, now);
     ctx.restore();
   }
 

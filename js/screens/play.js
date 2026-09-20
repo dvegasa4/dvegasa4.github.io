@@ -1,6 +1,6 @@
 import { getPuzzle, updateProgress, isQuotaError } from "../storage/db.js";
 import { PuzzleEngine } from "../puzzle/engine.js";
-import { showToast } from "../ui.js";
+import { showToast, progressOf } from "../ui.js";
 
 export function renderPlay(root, id) {
   const screen = document.createElement("div");
@@ -18,7 +18,23 @@ export function renderPlay(root, id) {
     </div>
     <div class="play-stage">
       <canvas></canvas>
-      <div class="win" hidden>
+      <div class="win" data-loading hidden>
+        <div class="win-card">
+          <h2>Готовим пазл…</h2>
+          <p>Разрезаем фото на кусочки, это быстро.</p>
+        </div>
+      </div>
+      <div class="win" data-error hidden>
+        <div class="win-card">
+          <h2>Не получилось открыть пазл</h2>
+          <p data-error-text>Попробуйте ещё раз или вернитесь к списку.</p>
+          <div class="modal-actions">
+            <a class="btn btn-ghost" href="#/">К списку</a>
+            <button class="btn" type="button" data-retry>Повторить</button>
+          </div>
+        </div>
+      </div>
+      <div class="win" data-win hidden>
         <div class="win-card">
           <h2>Готово!</h2>
           <p>Картинка собралась. Можно начать другой пазл или пересмотреть этот.</p>
@@ -32,10 +48,14 @@ export function renderPlay(root, id) {
   const canvas = screen.querySelector("canvas");
   const pctEl = screen.querySelector("[data-pct]");
   const hintBtn = screen.querySelector("[data-hint]");
-  const winEl = screen.querySelector(".win");
+  const loadingEl = screen.querySelector("[data-loading]");
+  const errorEl = screen.querySelector("[data-error]");
+  const errorTextEl = screen.querySelector("[data-error-text]");
+  const winEl = screen.querySelector("[data-win]");
 
   let engine = null;
   let gone = false;
+  let winTimer = 0;
 
   const persist = async (state, extra = {}) => {
     try {
@@ -57,40 +77,93 @@ export function renderPlay(root, id) {
     engine?.setHint(on);
   });
 
-  (async () => {
-    const puzzle = await getPuzzle(id);
+  const showError = (message) => {
+    loadingEl.hidden = true;
+    errorTextEl.textContent = message;
+    errorEl.hidden = false;
+  };
+
+  const load = async () => {
+    engine?.destroy();
+    engine = null;
+    clearTimeout(winTimer);
+    errorEl.hidden = true;
+    winEl.hidden = true;
+    loadingEl.hidden = false;
+
+    let puzzle;
+    try {
+      puzzle = await getPuzzle(id);
+    } catch (err) {
+      console.error("Не удалось прочитать пазл из хранилища", err);
+      if (gone) return;
+      showError("Хранилище недоступно. Проверьте место на устройстве и повторите попытку.");
+      return;
+    }
     if (gone) return;
     if (!puzzle) {
+      loadingEl.hidden = true;
       showToast("Пазл не найден");
       location.hash = "#/";
       return;
     }
+
     let image;
     try {
-      image = await createImageBitmap(puzzle.image);
-    } catch {
-      image = await loadImage(puzzle.image);
+      try {
+        image = await createImageBitmap(puzzle.image);
+      } catch (err) {
+        image = await loadImage(puzzle.image);
+      }
+    } catch (err) {
+      console.error("Не удалось decode фото пазла", err);
+      if (gone) return;
+      showError("Не получилось открыть фото этого пазла.");
+      return;
     }
     if (gone) {
       image.close?.();
       return;
     }
-    engine = new PuzzleEngine(canvas, puzzle, image, {
-      onChange(state) {
-        pctEl.textContent = `${engine.progress()}%`;
-        persist(state);
-      },
-      onComplete() {
-        winEl.hidden = false;
-        pctEl.textContent = "100%";
-      },
-    });
-    pctEl.textContent = `${engine.progress()}%`;
+
+    const updatePct = (state) => {
+      const pct = progressOf({ cols: puzzle.cols, rows: puzzle.rows, groups: state.groups, completed: state.completed });
+      pctEl.textContent = `${pct}%`;
+    };
+
+    try {
+      engine = new PuzzleEngine(canvas, puzzle, image, {
+        onChange(state) {
+          updatePct(state);
+          persist(state);
+        },
+        onComplete() {
+          pctEl.textContent = "100%";
+          clearTimeout(winTimer);
+          winTimer = setTimeout(() => {
+            if (!gone) winEl.hidden = false;
+          }, 5000);
+        },
+      });
+    } catch (err) {
+      console.error("Не удалось собрать сцену пазла", err);
+      if (gone) return;
+      showError("Не получилось собрать пазл на экране.");
+      return;
+    }
+
+    loadingEl.hidden = true;
+    updatePct(engine.snapshot());
     if (puzzle.completed) winEl.hidden = false;
-  })();
+  };
+
+  screen.querySelector("[data-retry]").addEventListener("click", load);
+
+  load();
 
   return () => {
     gone = true;
+    clearTimeout(winTimer);
     document.removeEventListener("visibilitychange", onVis);
     window.removeEventListener("pagehide", onVis);
     engine?.destroy();

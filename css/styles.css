@@ -381,10 +381,17 @@ a {
   position: absolute;
   inset: 0;
   background: rgba(58, 42, 36, 0.28);
-  display: grid;
   place-items: center;
   padding: 24px;
   z-index: 3;
+}
+
+.win[hidden] {
+  display: none !important;
+}
+
+.win:not([hidden]) {
+  display: grid;
 }
 
 .win-card {
